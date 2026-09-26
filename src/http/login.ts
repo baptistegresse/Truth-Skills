@@ -80,7 +80,9 @@ export const createLoginRouter = ({ db, config, provider, world }: LoginDeps) =>
       return await world.verify(result);
     } catch (error) {
       if (error instanceof WorldRejectedError) {
-        if (config.WORLD_ENVIRONMENT !== "production") console.warn(`World verify: ${error.code}`);
+        if (config.WORLD_ENVIRONMENT !== "production") {
+          console.warn(`World verify: ${error.code}${error.detail ? ` — ${error.detail}` : ""}${error.shape ? ` (${error.shape})` : ""}`);
+        }
         throw new LoginError("World ID could not verify this proof.", 401);
       }
       throw error;

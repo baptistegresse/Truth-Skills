@@ -101,6 +101,7 @@ Run this against the sandbox before a demo.
 |---|---|---|---|
 | World App | "v4 protocol and credential issuance must both be enabled for this account" | Sandbox tester not enrolled | Enroll once with `WORLD_INVITE_CODE=true` |
 | Server log | `World verify: environment_not_allowed` | No sandbox verification window | `npm run staging:open`, restart the server |
+| Server log | `World verify: environment_not_allowed — Invalid staging verification token.` | Someone ran `staging:open` again: each run issues a new token and invalidates the previous one | Have one person open the window and share the token, or run `npm run staging:open` again and restart |
 | Sign-in page | "You already have a Truth-Skills account, but this browser does not remember it" (World App: `nullifier_replayed`) | A second signup proof for an existing human, from a browser without the session cookie (expected) | Paste the recovery link in the form the page opens: one scan |
 | Sign-in page | "This sign-in has expired" | More than 10 minutes since Claude Code opened it | Authenticate again from Claude Code |
 | Claude Code | truth-skills missing from `/mcp` | Claude started in another folder than the one the MCP was added in | Start it there, or add the MCP with `--scope user` |
