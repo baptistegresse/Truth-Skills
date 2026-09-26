@@ -73,6 +73,50 @@ Afterwards Claude Code refreshes its token silently every hour. After 90 days, o
 
 A human who loses both the cookie and the recovery link cannot get back in, and cannot create a second account either.
 
+### Using the production deployment (Vercel)
+
+The server runs at `https://truth-skills.vercel.app/mcp`. You don't need a local server, `.env` or database to use it.
+
+**1. Add the server once, for every project:**
+
+```bash
+claude mcp add --scope user --transport http truth-skills-prod https://truth-skills.vercel.app/mcp
+```
+
+`--scope user` makes it available in every folder you start `claude` in. The name `truth-skills-prod` becomes part of the tool's name: `mcp__truth-skills-prod__grade_skill`.
+
+**2. Recommended: load the tool up front.** Claude Code defers MCP tools by default, so Claude only sees `grade_skill` after searching for it, and the server's "grade on your own" instructions can't take effect. To add the server with `alwaysLoad` instead of the command in step 1:
+
+```bash
+claude mcp add-json --scope user truth-skills-prod '{"type":"http","url":"https://truth-skills.vercel.app/mcp","alwaysLoad":true}'
+```
+
+**3. Let the agent grade without a permission prompt.** Add the rule to `.claude/settings.local.json` in your project. This file is personal and git-ignored; merge the rule into any existing `allow` list:
+
+```json
+{
+  "permissions": {
+    "allow": ["mcp__truth-skills-prod__grade_skill"]
+  }
+}
+```
+
+A rule in `.claude/settings.local.json` applies to that project only. To grade without prompts everywhere, put the same rule in `~/.claude/settings.json`.
+
+**4. Sign in.** Start a new `claude` session, then go to `/mcp` → **truth-skills-prod** → **Authenticate**. The browser opens `https://truth-skills.vercel.app/login`; sign in with World ID as described above. `/mcp` should then show truth-skills-prod as connected, with `grade_skill`.
+
+To check:
+
+```bash
+claude mcp list          # truth-skills-prod: https://truth-skills.vercel.app/mcp (HTTP) - ✓ Connected
+```
+
+In Claude Code, `/permissions` should list `mcp__truth-skills-prod__grade_skill` under Allow.
+
+**Keep one entry per deployment.** If you also have a local development entry (`truth-skills` → `http://localhost:3000/mcp`), Claude sees two `grade_skill` tools. Remove the one you don't use (`claude mcp remove truth-skills -s local`), or leave the development entry without `alwaysLoad`.
+
+To remove the production server: `claude mcp remove truth-skills-prod -s user`.
+
 ## End-to-end checklist
 
 Run this against the sandbox before a demo.
