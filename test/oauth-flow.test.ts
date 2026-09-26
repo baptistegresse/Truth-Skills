@@ -5,9 +5,10 @@ import { createApp } from "../src/app.js";
 import { TruthSkillsAuthProvider } from "../src/auth/provider.js";
 import { hashToken, randomToken, signAccessToken } from "../src/auth/tokens.js";
 import { runMigrations } from "../src/db/migrate.js";
+import { testConfig } from "./helpers/config.js";
 import { createTestDb } from "./helpers/pglite.js";
 
-const config = { PUBLIC_URL: "http://localhost:3000", JWT_SECRET: "a".repeat(64) };
+const config = testConfig();
 const RESOURCE = "http://localhost:3000/mcp";
 const CALLBACK = "http://localhost:51938/callback";
 

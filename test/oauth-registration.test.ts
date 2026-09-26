@@ -2,6 +2,7 @@ import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { runMigrations } from "../src/db/migrate.js";
+import { testConfig } from "./helpers/config.js";
 import { createTestDb } from "./helpers/pglite.js";
 
 describe("OAuth authorization server", () => {
@@ -10,7 +11,7 @@ describe("OAuth authorization server", () => {
   beforeAll(async () => {
     db = await createTestDb();
     await runMigrations(db);
-    app = createApp({ config: { PUBLIC_URL: "http://localhost:3000", JWT_SECRET: "a".repeat(64) }, db });
+    app = createApp({ config: testConfig(), db });
   });
   afterAll(async () => {
     await db.close();
@@ -47,7 +48,7 @@ describe("OAuth authorization server", () => {
     });
 
     it("refuses a plain-http issuer outside localhost", () => {
-      expect(() => createApp({ config: { PUBLIC_URL: "http://truth-skills.example", JWT_SECRET: "a".repeat(64) }, db })).toThrow(/HTTPS/);
+      expect(() => createApp({ config: testConfig({ PUBLIC_URL: "http://truth-skills.example" }), db })).toThrow(/HTTPS/);
     });
   });
 
