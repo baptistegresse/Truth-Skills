@@ -5,17 +5,20 @@ import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from "@modelconte
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { VOTE_SCOPE, type Config } from "./config.js";
 import { TruthSkillsAuthProvider } from "./auth/provider.js";
-import type { Queryable } from "./db/pool.js";
+import { createWorldVerifier, type WorldVerifier } from "./auth/world.js";
+import type { Connectable, Queryable } from "./db/pool.js";
+import { createLoginRouter, type LoginDeps } from "./http/login.js";
 import { createMcpServer } from "./mcp/server.js";
 
 export interface AppOptions {
-  config: Pick<Config, "PUBLIC_URL" | "JWT_SECRET">;
-  db: Queryable;
-  // Overrides the provider's token check (tests only).
+  config: Pick<Config, "JWT_SECRET"> & LoginDeps["config"];
+  db: Queryable & Connectable;
+  // Test doubles: the provider's token check, and the World Verify API.
   verifier?: OAuthTokenVerifier;
+  world?: WorldVerifier;
 }
 
-export const createApp = ({ config, db, verifier }: AppOptions) => {
+export const createApp = ({ config, db, verifier, world = createWorldVerifier(config) }: AppOptions) => {
   const app = express();
   app.disable("x-powered-by");
 
@@ -36,6 +39,9 @@ export const createApp = ({ config, db, verifier }: AppOptions) => {
       resourceName: "Truth-Skills",
     }),
   );
+
+  // The World ID sign-in that /authorize hands the browser to.
+  app.use(createLoginRouter({ db, config, provider, world }));
 
   const bearer = requireBearerAuth({
     verifier: verifier ?? provider,
