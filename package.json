@@ -30,6 +30,7 @@
     "express": "^5.2.1",
     "jose": "^6.2.12",
     "pg": "^8.23.0",
+    "qrcode-generator": "^2.0.4",
     "zod": "^4.6.5"
   },
   "devDependencies": {
