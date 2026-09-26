@@ -54,7 +54,7 @@ export const createApp = ({ config, db, verifier, world = createWorldVerifier(co
   // Stateless Streamable HTTP: one McpServer + transport per request, no Mcp-Session-Id.
   // bearer runs before express.json, so an unauthenticated body is never parsed.
   app.post("/mcp", bearer, express.json({ limit: "256kb" }), async (req, res) => {
-    const server = createMcpServer();
+    const server = createMcpServer(db);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on("close", () => {
       void transport.close();
