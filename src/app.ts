@@ -8,6 +8,7 @@ import { TruthSkillsAuthProvider } from "./auth/provider.js";
 import { createWorldVerifier, type WorldVerifier } from "./auth/world.js";
 import type { Connectable, Queryable } from "./db/pool.js";
 import { createLoginRouter, type LoginDeps } from "./http/login.js";
+import { createPagesRouter } from "./http/pages.js";
 import { createMcpServer } from "./mcp/server.js";
 
 export interface AppOptions {
@@ -41,6 +42,7 @@ export const createApp = ({ config, db, verifier, world = createWorldVerifier(co
   );
 
   // The World ID sign-in that /authorize hands the browser to.
+  app.use(createPagesRouter());
   app.use(createLoginRouter({ db, config, provider, world }));
 
   const bearer = requireBearerAuth({

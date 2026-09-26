@@ -5,6 +5,7 @@ import {
   attachWorldSession,
   createAccountWithNullifier,
   findAccountByNullifier,
+  findAccountBySession,
   hasWorldSession,
 } from "../auth/accounts.js";
 import {
@@ -16,6 +17,7 @@ import {
   type LoginRequest,
 } from "../auth/loginRequests.js";
 import type { TruthSkillsAuthProvider } from "../auth/provider.js";
+import { parseRecoveryInput, recoveryUrl } from "../auth/recovery.js";
 import { createRpContext, WorldRejectedError, type WorldVerifier } from "../auth/world.js";
 import type { Connectable, Queryable } from "../db/pool.js";
 import { readCookie } from "./cookies.js";
@@ -37,7 +39,8 @@ const RequestId = z.uuid();
 
 const RpContextBody = z.object({
   req: RequestId,
-  kind: z.enum(["account", "session"]),
+  kind: z.enum(["account", "session", "prove"]),
+  recovery: z.string().max(2048).optional(), // a pasted recovery link, for "prove"
 });
 
 // The IDKit result is forwarded to World untouched; we only read the fields we check.
@@ -123,7 +126,38 @@ export const createLoginRouter = ({ db, config, provider, world }: LoginDeps) =>
       throw new LoginError("This World ID session is already linked.", 409);
     }
     rememberSession(res, sessionId);
-    return { redirect: await provider.completeAuthorization(request.id, request.account_id) };
+    return {
+      redirect: await provider.completeAuthorization(request.id, request.account_id),
+      recovery_url: recoveryUrl(config.PUBLIC_URL, sessionId),
+    };
+  };
+
+  // Where the session to prove comes from: a pasted recovery link wins over the cookie. Either way
+  // it must belong to an account before the phone is asked for anything.
+  const resolveProveSession = async (req: Request, recovery?: string) => {
+    const sessionId = recovery !== undefined ? parseRecoveryInput(recovery) : readCookie(req, SESSION_COOKIE);
+    if (!sessionId) {
+      throw new LoginError(
+        recovery !== undefined ? "This is not a valid recovery link." : "No previous World ID session in this browser.",
+        404,
+      );
+    }
+    if (!(await findAccountBySession(db, sessionId))) {
+      throw new LoginError("No account matches this recovery link.", 404);
+    }
+    return sessionId;
+  };
+
+  // A returning human: one scan proving the World ID session stored at sign-up.
+  const handleProveProof = async (request: LoginRequest, result: ProofResult, res: Response) => {
+    const expected = request.expected_session_id;
+    if (!expected || result.session_id !== expected || result.action) throw new LoginError("Unexpected session.");
+    const { sessionId } = await verifyOrThrow(result);
+    if (sessionId && sessionId !== expected) throw new LoginError("Unexpected session.");
+    const accountId = await findAccountBySession(db, expected);
+    if (!accountId) throw new LoginError("No account for this World ID session.", 404);
+    rememberSession(res, expected); // this browser is now remembered
+    return { redirect: await provider.completeAuthorization(request.id, accountId) };
   };
 
   // What the sign-in page shows: who is asking, and how to talk to World ID.
@@ -146,14 +180,15 @@ export const createLoginRouter = ({ db, config, provider, world }: LoginDeps) =>
   // A freshly signed World ID request for the next step. Its nonce is stored: only a proof
   // answering this exact request will be accepted.
   router.post("/login/rp-context", async (req, res) => {
-    const { req: requestId, kind } = RpContextBody.parse(req.body);
+    const { req: requestId, kind, recovery } = RpContextBody.parse(req.body);
     await requireLoginRequest(requestId);
+    const sessionId = kind === "prove" ? await resolveProveSession(req, recovery) : null;
     const action = kind === "account" ? ACCOUNT_ACTION : undefined;
     const rpContext = createRpContext(config, action);
-    if (!(await enterStep(db, requestId, ALLOWED_FROM[kind], kind, rpContext.nonce))) {
+    if (!(await enterStep(db, requestId, ALLOWED_FROM[kind], kind, rpContext.nonce, sessionId))) {
       throw new LoginError("Login step out of order.", 409);
     }
-    res.json({ rp_context: rpContext, action });
+    res.json({ rp_context: rpContext, action, session_id: sessionId ?? undefined });
   });
 
   router.post("/login/verify", async (req, res) => {
@@ -165,6 +200,7 @@ export const createLoginRouter = ({ db, config, provider, world }: LoginDeps) =>
 
     if (request.step === "account") return void res.json(await handleAccountProof(request, result));
     if (request.step === "session") return void res.json(await handleSessionProof(request, result, res));
+    if (request.step === "prove") return void res.json(await handleProveProof(request, result, res));
     throw new LoginError("Login step out of order.", 409);
   });
 
