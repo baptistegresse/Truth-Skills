@@ -5,6 +5,7 @@
     "moduleResolution": "nodenext",
     "lib": ["es2023"],
     "types": ["node"],
+    "typeRoots": ["./node_modules/@types"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
@@ -15,5 +16,5 @@
     "isolatedModules": true,
     "noEmit": true
   },
-  "include": ["src", "test", "vitest.config.ts"]
+  "include": ["src", "test", "server.ts", "vitest.config.ts"]
 }
