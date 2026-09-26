@@ -9,9 +9,9 @@ import type { Queryable } from "./db/pool.js";
 import { createMcpServer } from "./mcp/server.js";
 
 export interface AppOptions {
-  config: Pick<Config, "PUBLIC_URL">;
+  config: Pick<Config, "PUBLIC_URL" | "JWT_SECRET">;
   db: Queryable;
-  // Overrides the provider's token check; lets tests reach /mcp before tokens can be issued.
+  // Overrides the provider's token check (tests only).
   verifier?: OAuthTokenVerifier;
 }
 
@@ -23,7 +23,7 @@ export const createApp = ({ config, db, verifier }: AppOptions) => {
   const resourceUrl = new URL("/mcp", config.PUBLIC_URL);
   const resourceMetadataUrl = getOAuthProtectedResourceMetadataUrl(resourceUrl);
 
-  const provider = new TruthSkillsAuthProvider(db);
+  const provider = new TruthSkillsAuthProvider(db, config, resourceUrl);
 
   // The authorization server: /authorize, /token, /register, the RFC 8414 metadata, and the
   // RFC 9728 protected resource metadata that tells the client which authorization server to use.

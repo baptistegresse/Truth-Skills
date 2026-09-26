@@ -4,7 +4,7 @@ import { InvalidTokenError } from "@modelcontextprotocol/sdk/server/auth/errors.
 import type { OAuthTokenVerifier } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 import { createApp } from "../src/app.js";
 
-const config = { PUBLIC_URL: "http://localhost:3000" };
+const config = { PUBLIC_URL: "http://localhost:3000", JWT_SECRET: "a".repeat(64) };
 // None of these requests reach the database.
 const db = { query: async () => { throw new Error("unexpected query"); } };
 const RESOURCE_METADATA = "http://localhost:3000/.well-known/oauth-protected-resource/mcp";
@@ -96,7 +96,7 @@ describe("GET /.well-known/oauth-protected-resource/mcp", () => {
   });
 
   it("follows PUBLIC_URL", async () => {
-    const app = createApp({ config: { PUBLIC_URL: "https://truth-skills.example" }, db });
+    const app = createApp({ config: { ...config, PUBLIC_URL: "https://truth-skills.example" }, db });
     const res = await request(app).get("/.well-known/oauth-protected-resource/mcp");
     expect(res.body.resource).toBe("https://truth-skills.example/mcp");
     const unauthorized = await postMcp(app).send(initialize);

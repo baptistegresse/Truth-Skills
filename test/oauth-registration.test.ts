@@ -10,7 +10,7 @@ describe("OAuth authorization server", () => {
   beforeAll(async () => {
     db = await createTestDb();
     await runMigrations(db);
-    app = createApp({ config: { PUBLIC_URL: "http://localhost:3000" }, db });
+    app = createApp({ config: { PUBLIC_URL: "http://localhost:3000", JWT_SECRET: "a".repeat(64) }, db });
   });
   afterAll(async () => {
     await db.close();
@@ -47,7 +47,7 @@ describe("OAuth authorization server", () => {
     });
 
     it("refuses a plain-http issuer outside localhost", () => {
-      expect(() => createApp({ config: { PUBLIC_URL: "http://truth-skills.example" }, db })).toThrow(/HTTPS/);
+      expect(() => createApp({ config: { PUBLIC_URL: "http://truth-skills.example", JWT_SECRET: "a".repeat(64) }, db })).toThrow(/HTTPS/);
     });
   });
 
@@ -105,13 +105,10 @@ describe("OAuth authorization server", () => {
       expect(res.headers.location).toBeUndefined();
     });
 
-    it("redirects back with an OAuth error until sign-in exists", async () => {
+    it("hands the browser to the sign-in page", async () => {
       const res = await authorize({ client_id: clientId, redirect_uri: "http://localhost:51938/callback", state: "s1" });
       expect(res.status).toBe(302);
-      const location = new URL(res.headers.location!);
-      expect(location.origin + location.pathname).toBe("http://localhost:51938/callback");
-      expect(location.searchParams.get("error")).toBe("temporarily_unavailable");
-      expect(location.searchParams.get("state")).toBe("s1");
+      expect(res.headers.location).toMatch(/^http:\/\/localhost:3000\/login\?req=[0-9a-f-]{36}$/);
     });
   });
 });
