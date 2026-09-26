@@ -5,14 +5,19 @@ import express, { type Response } from "express";
 
 const PUBLIC_DIR = fileURLToPath(new URL("../../public/", import.meta.url));
 const require = createRequire(import.meta.url);
-const IDKIT_DIR = dirname(require.resolve("@worldcoin/idkit-core")); // dist/, next to the browser build
+// The browser build is not an export of the package, so it is located by path. Written as a
+// literal new URL(…, import.meta.url), which Vercel's file tracing follows into the function bundle.
+const IDKIT_BROWSER_BUILD = fileURLToPath(
+  new URL("../../node_modules/@worldcoin/idkit-core/dist/idkit.global.js", import.meta.url),
+);
+const IDKIT_DIR = dirname(require.resolve("@worldcoin/idkit-core")); // dist/, holds the wasm
 const QRCODE_FILE = require.resolve("qrcode-generator");
 
 // Served from our origin rather than a CDN, so the page can forbid every third-party script.
 const ASSETS: Record<string, string> = {
   "login.js": join(PUBLIC_DIR, "login.js"),
   "login.css": join(PUBLIC_DIR, "login.css"),
-  "idkit.global.js": join(IDKIT_DIR, "idkit.global.js"),
+  "idkit.global.js": IDKIT_BROWSER_BUILD,
   "idkit_wasm_bg.wasm": join(IDKIT_DIR, "idkit_wasm_bg.wasm"), // fetched by idkit.global.js, same folder
   "qrcode.js": QRCODE_FILE,
 };
