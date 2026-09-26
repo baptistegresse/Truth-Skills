@@ -55,6 +55,27 @@ describe("createWorldVerifier", () => {
     expect(await createWorldVerifier(config, fetch).verify(result)).toMatchObject({ sessionId: "session_ab" });
   });
 
+  it("accepts null for the fields a proof type does not have", async () => {
+    const fetch = fakeFetch(200, { success: true, session_id: "session_ab", nullifier: null, code: null });
+    expect(await createWorldVerifier(config, fetch).verify(result)).toEqual({ nullifier: undefined, sessionId: "session_ab" });
+  });
+
+  it("describes an unreadable answer by its shape, never its values", async () => {
+    const fetch = fakeFetch(200, { success: "yes", session_id: 5, results: [{ nullifier: "0xsecret" }], extra: null });
+    const verify = createWorldVerifier(config, fetch).verify(result);
+    await expect(verify).rejects.toMatchObject({
+      code: "malformed_response",
+      shape: "HTTP 200 {success: string, session_id: number, results: array, extra: null}",
+    });
+    await expect(verify).rejects.not.toMatchObject({ shape: expect.stringContaining("secret") });
+  });
+
+  it("keeps the code and detail of an error answer without a success field", async () => {
+    const body = { code: "session_not_found", detail: "No session.", attribute: "session_id", app_id: "app_x" };
+    const verify = createWorldVerifier(config, fakeFetch(403, body)).verify(result);
+    await expect(verify).rejects.toMatchObject({ code: "session_not_found", detail: "No session." });
+  });
+
   it.each([
     ["an error answer", 400, { success: false, code: "environment_not_allowed" }, "environment_not_allowed"],
     ["success: false", 200, { success: false, code: "invalid_proof" }, "invalid_proof"],

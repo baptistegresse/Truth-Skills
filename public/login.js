@@ -19,6 +19,20 @@ const setStatus = (text, isError = false) => {
 
 const isAbort = (error) => error && error.name === "AbortError";
 
+// World App refuses a second uniqueness proof for the same human and action: this human already
+// has an account, and only their World ID session (cookie or recovery link) can sign them in.
+const ALREADY_REGISTERED = "nullifier_replayed";
+
+class WorldAppError extends Error {
+  constructor(code) {
+    super(`World App did not complete the request (${code}).`);
+    this.code = code;
+  }
+}
+
+// An error whose way out is the recovery link, not another scan.
+class NeedsRecoveryError extends Error {}
+
 const postJson = async (url, body) => {
   const res = await fetch(url, {
     method: "POST",
@@ -27,9 +41,12 @@ const postJson = async (url, body) => {
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status}).`);
+  if (!res.ok) throw Object.assign(new Error(data.error || `Request failed (${res.status}).`), { status: res.status });
   return data;
 };
+
+// The server answers 404 to a "prove" request when this browser's session matches no account.
+const NO_SESSION = 404;
 
 const showQr = (uri) => {
   const qr = window.qrcode(0, "M");
@@ -50,7 +67,7 @@ const scan = async (builder, signal) => {
   try {
     const completion = await request.pollUntilCompletion({ pollInterval: 2000, timeout: 180000, signal });
     if (signal.aborted) throw new DOMException("Cancelled", "AbortError");
-    if (!completion.success) throw new Error(`World App did not complete the request (${completion.error}).`);
+    if (!completion.success) throw new WorldAppError(completion.error);
     return completion.result;
   } finally {
     if (!signal.aborted) show("scan", false);
@@ -71,6 +88,12 @@ const finish = (redirect) => {
 
 // Runs a step of the flow; on failure shows the error and offers "Try again", which reruns the
 // step the flow had reached (a flow that moves on to scan 2 updates `retry` itself).
+const showRecoveryForm = () => {
+  show("recovery-form", true);
+  $("recovery-form").querySelector("details").open = true;
+  $("recovery-input").focus();
+};
+
 const run = async (step) => {
   show("retry", false);
   retry = step;
@@ -80,6 +103,7 @@ const run = async (step) => {
     if (isAbort(error)) return;
     show("scan", false);
     setStatus(error.message || "Something went wrong.", true);
+    if (error instanceof NeedsRecoveryError) return showRecoveryForm();
     show("retry", true);
   }
 };
@@ -98,7 +122,13 @@ const accountFlow = async () => {
     environment: ctx.environment,
   };
   const builder = ctx.invite_code ? IDKit.requestWithInviteCode(config) : IDKit.request(config);
-  const result = await scan(builder, signal);
+  const result = await scan(builder, signal).catch((error) => {
+    if (error.code !== ALREADY_REGISTERED) throw error;
+    throw new NeedsRecoveryError(
+      "You already have a Truth-Skills account, but this browser does not remember it. " +
+        "Paste your recovery link below to sign in with one scan.",
+    );
+  });
   const outcome = await postJson("/login/verify", { req: requestId, result });
   if (outcome.redirect) return finish(outcome.redirect);
   retry = sessionFlow;
@@ -150,18 +180,21 @@ const showRecoveryLink = (outcome) => {
   });
 };
 
+// A returning human proves the session remembered by this browser. Only when the server knows no
+// such session does the page fall back to sign-up: for an existing human, World App would refuse
+// scan 1, so any other failure is shown, with "Try again" and the recovery link.
 const start = async () => {
-  if (ctx.returning) {
-    try {
-      setStatus("Welcome back — scan once with World App.");
-      await proveFlow(undefined);
-      return;
-    } catch (error) {
-      if (isAbort(error)) return;
-      // The session in this browser did not work: fall back to the first sign-in.
+  if (!ctx.returning) return accountFlow();
+  setStatus("Welcome back — scan once with World App.");
+  try {
+    await proveFlow(undefined);
+  } catch (error) {
+    if (error.status !== NO_SESSION) {
+      if (!isAbort(error)) show("recovery-form", true);
+      throw error;
     }
+    await accountFlow();
   }
-  await accountFlow();
 };
 
 $("recovery-form").addEventListener("submit", (event) => {

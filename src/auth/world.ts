@@ -37,11 +37,16 @@ export const verifyHeaders = (config: WorldConfig): Record<string, string> => {
   return headers;
 };
 
+// A field a proof type does not have may come back as null (a session proof has no uniqueness
+// nullifier, a success has no error code).
+// An error answer carries no success field, only a code and a human-readable detail.
+const VerifyError = z.object({ code: z.string(), detail: z.string().nullish() });
+
 const VerifyResponse = z.object({
   success: z.boolean(),
-  nullifier: z.string().optional(),
-  session_id: z.string().optional(),
-  code: z.string().optional(),
+  nullifier: z.string().nullish(),
+  session_id: z.string().nullish(),
+  code: z.string().nullish(),
 });
 
 export interface VerifiedProof {
@@ -50,10 +55,25 @@ export interface VerifiedProof {
 }
 
 export class WorldRejectedError extends Error {
-  constructor(readonly code: string) {
+  // detail: World's explanation of an error answer. shape: for an unreadable answer, its HTTP
+  // status and field types, to debug without logging values.
+  constructor(
+    readonly code: string,
+    readonly shape?: string,
+    readonly detail?: string,
+  ) {
     super(`World ID rejected the proof: ${code}`);
   }
 }
+
+const typeOf = (value: unknown) => (value === null ? "null" : Array.isArray(value) ? "array" : typeof value);
+
+// "HTTP 200 {success: boolean, nullifier: null}": names and types only, never values.
+export const describeShape = (status: number, body: unknown) => {
+  if (typeOf(body) !== "object") return `HTTP ${status} ${typeOf(body)}`;
+  const fields = Object.entries(body as Record<string, unknown>).map(([key, value]) => `${key}: ${typeOf(value)}`);
+  return `HTTP ${status} {${fields.join(", ")}}`;
+};
 
 export interface WorldVerifier {
   // Throws WorldRejectedError when World says no.
@@ -68,10 +88,18 @@ export const createWorldVerifier = (config: WorldConfig, fetchImpl: typeof fetch
       headers: verifyHeaders(config),
       body: JSON.stringify(result),
     });
-    const parsed = VerifyResponse.safeParse(await response.json().catch(() => null));
-    if (!response.ok || !parsed.success || !parsed.data.success) {
-      throw new WorldRejectedError(parsed.success ? (parsed.data.code ?? `http_${response.status}`) : "malformed_response");
+    const body: unknown = await response.json().catch(() => undefined);
+    const parsed = VerifyResponse.safeParse(body);
+    if (!parsed.success) {
+      const error = VerifyError.safeParse(body);
+      if (!response.ok && error.success) {
+        throw new WorldRejectedError(error.data.code, undefined, error.data.detail ?? undefined);
+      }
+      throw new WorldRejectedError("malformed_response", describeShape(response.status, body));
     }
-    return { nullifier: parsed.data.nullifier, sessionId: parsed.data.session_id };
+    if (!response.ok || !parsed.data.success) {
+      throw new WorldRejectedError(parsed.data.code ?? `http_${response.status}`);
+    }
+    return { nullifier: parsed.data.nullifier ?? undefined, sessionId: parsed.data.session_id ?? undefined };
   },
 });

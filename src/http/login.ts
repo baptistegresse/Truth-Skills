@@ -80,7 +80,9 @@ export const createLoginRouter = ({ db, config, provider, world }: LoginDeps) =>
       return await world.verify(result);
     } catch (error) {
       if (error instanceof WorldRejectedError) {
-        if (config.WORLD_ENVIRONMENT !== "production") console.warn(`World verify: ${error.code}`);
+        if (config.WORLD_ENVIRONMENT !== "production") {
+          console.warn(`World verify: ${error.code}${error.detail ? ` — ${error.detail}` : ""}${error.shape ? ` (${error.shape})` : ""}`);
+        }
         throw new LoginError("World ID could not verify this proof.", 401);
       }
       throw error;
@@ -205,7 +207,11 @@ export const createLoginRouter = ({ db, config, provider, world }: LoginDeps) =>
   });
 
   router.use("/login", (error: unknown, _req: Request, res: Response, _next: NextFunction) => {
-    if (error instanceof LoginError) return void res.status(error.status).json({ error: error.message });
+    if (error instanceof LoginError) {
+      // Outside production, every refused step is logged: the page only shows the message.
+      if (config.WORLD_ENVIRONMENT !== "production") console.warn(`Sign-in refused (${error.status}): ${error.message}`);
+      return void res.status(error.status).json({ error: error.message });
+    }
     if (error instanceof z.ZodError) return void res.status(400).json({ error: "Invalid request." });
     if (error instanceof SyntaxError) return void res.status(400).json({ error: "Invalid JSON." });
     console.error(error);

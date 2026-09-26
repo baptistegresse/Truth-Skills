@@ -8,7 +8,7 @@ Claude Code ──OAuth 2.1 + PKCE──▶ Truth-Skills ──verify proof─�
      └── Bearer token on POST /mcp ──┘    └── sign-in page ◀── World App (phone)
 ```
 
-- **MCP endpoint**: `POST /mcp`, stateless Streamable HTTP. One tool, `grade_skill`, acting for the account in the access token.
+- **MCP endpoint**: `POST /mcp`, stateless Streamable HTTP. One tool, `grade_skill`, acting for the account in the access token. The agent grades on its own: the server's instructions tell it to grade every skill used in the conversation (liked when it helped, disliked when the user struggled) without ever asking the user.
 - **Authorization server**: our own, in the same process (`/authorize`, `/token`, `/register`, `/revoke`, RFC 8414 / 9728 metadata).
 - **Sign-in**: the first time, two scans with World App: a uniqueness proof creates the account, then a World ID session lets us recognise the same human later. Returning humans scan once.
 
@@ -57,6 +57,12 @@ claude                       # from the same folder the MCP was added in
 
 The browser opens the sign-in page. It shows which application is asking and which local address it will return to; continue only if you started it from Claude Code. Scan QR 1, scan QR 2, save the recovery link, then click **I saved it, continue**. Back in Claude Code, `/mcp` shows truth-skills connected with `grade_skill`.
 
+Let the agent grade without a permission prompt, since grading is exactly what the user agreed to when connecting. In the project's `.claude/settings.json` (or `~/.claude/settings.json` for every project):
+
+```json
+{ "permissions": { "allow": ["mcp__truth-skills__grade_skill"] } }
+```
+
 Afterwards Claude Code refreshes its token silently every hour. After 90 days, or on a new machine, it signs in again:
 
 | Situation | What happens | Effort |
@@ -74,7 +80,7 @@ Run this against the sandbox before a demo.
 - [ ] `curl -si -X POST localhost:3000/mcp -H 'content-type: application/json' -d '{}'` → `401` with `WWW-Authenticate: Bearer error="invalid_token", … resource_metadata="…/.well-known/oauth-protected-resource/mcp"`
 - [ ] `curl -s localhost:3000/.well-known/oauth-authorization-server` lists `/authorize`, `/token`, `/register`, `/revoke` and `S256`
 - [ ] First sign-in from Claude Code: two scans, recovery link shown, back in Claude Code with `grade_skill` listed
-- [ ] Ask Claude to grade a skill (e.g. "I liked anthropic-skills:docx"); the answer shows the skill's likes and dislikes
+- [ ] Use a skill in a conversation (e.g. ask for a .docx); once it is done, Claude grades it on its own, without asking, and mentions it briefly
 - [ ] Same browser: `/mcp` → truth-skills → clear authentication → Authenticate → "Welcome back", one scan, same account
 - [ ] New machine: open the sign-in URL in a fresh private window (it must say "Step 1 of 2", not "Welcome back"), use the recovery link, one scan, same account
 - [ ] Database afterwards:
@@ -87,7 +93,7 @@ Run this against the sandbox before a demo.
 | `auth_codes` | Every code has `used_at` set |
 | `refresh_tokens` | One active (not revoked) token per account and client |
 | `auth_requests` | Finished sign-ins are gone |
-| `skill_grades` | One row per human per graded skill (`skill_provider`, `skill_name`, `liked`) |
+| `skill_grades` | One row per human per graded skill (`skill_name`, `liked`); a plugin prefix is dropped, so `anthropic-skills:docx` is stored as `docx` |
 
 ### Errors and what they mean
 
@@ -95,7 +101,8 @@ Run this against the sandbox before a demo.
 |---|---|---|---|
 | World App | "v4 protocol and credential issuance must both be enabled for this account" | Sandbox tester not enrolled | Enroll once with `WORLD_INVITE_CODE=true` |
 | Server log | `World verify: environment_not_allowed` | No sandbox verification window | `npm run staging:open`, restart the server |
-| World App | "There's a problem with this request … sent an invalid request" | A second signup proof for an existing human (expected) | Use the cookie or the recovery link |
+| Server log | `World verify: environment_not_allowed — Invalid staging verification token.` | Someone ran `staging:open` again: each run issues a new token and invalidates the previous one | Have one person open the window and share the token, or run `npm run staging:open` again and restart |
+| Sign-in page | "You already have a Truth-Skills account, but this browser does not remember it" (World App: `nullifier_replayed`) | A second signup proof for an existing human, from a browser without the session cookie (expected) | Paste the recovery link in the form the page opens: one scan |
 | Sign-in page | "This sign-in has expired" | More than 10 minutes since Claude Code opened it | Authenticate again from Claude Code |
 | Claude Code | truth-skills missing from `/mcp` | Claude started in another folder than the one the MCP was added in | Start it there, or add the MCP with `--scope user` |
 | Private window | "Welcome back" instead of step 1 | Claude Code opened the normal browser, which has the cookie | Copy the URL into a fresh private window |
