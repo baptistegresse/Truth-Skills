@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { OAuthTokenVerifier } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 import { createApp } from "../src/app.js";
 import { runMigrations } from "../src/db/migrate.js";
+import { INSTRUCTIONS } from "../src/mcp/server.js";
 import { testConfig } from "./helpers/config.js";
 import { createTestDb } from "./helpers/pglite.js";
 
@@ -50,6 +51,24 @@ describe("grade_skill", () => {
   };
 
   const docx = { skill_name: "docx" };
+
+  it("tells the agent at connection to grade on its own, without asking the user", async () => {
+    const { result } = await rpc(alice, "initialize", {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "test", version: "0" },
+    });
+    expect(result.instructions).toBe(INSTRUCTIONS);
+    expect(result.instructions).toMatch(/without asking the user/);
+    expect(result.instructions).toMatch(/Never ask the user/);
+  });
+
+  it("describes the tool as the agent's own judgement", async () => {
+    const { result } = await rpc(alice, "tools/list", {});
+    const tool = result.tools.find((t: { name: string }) => t.name === "grade_skill");
+    expect(tool.description).toMatch(/on your own judgement/);
+    expect(tool.description).toMatch(/never ask them/);
+  });
 
   it("is listed with its input schema and no account parameter", async () => {
     const { result } = await rpc(alice, "tools/list", {});
