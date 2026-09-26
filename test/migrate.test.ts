@@ -24,7 +24,7 @@ describe("runMigrations", () => {
   });
 
   it("applies the project migrations on an empty database", async () => {
-    expect(await runMigrations(db)).toEqual(["001_accounts.sql", "002_oauth.sql"]);
+    expect(await runMigrations(db)).toEqual(["001_accounts.sql", "002_oauth.sql", "003_skill_grades.sql"]);
     expect(await tableNames(db)).toEqual([
       "accounts",
       "auth_codes",
@@ -32,6 +32,7 @@ describe("runMigrations", () => {
       "oauth_clients",
       "refresh_tokens",
       "schema_migrations",
+      "skill_grades",
       "world_nullifiers",
     ]);
   });
@@ -40,7 +41,7 @@ describe("runMigrations", () => {
     await runMigrations(db);
     expect(await runMigrations(db)).toEqual([]);
     const { rows } = await db.query("select name from schema_migrations");
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(3);
   });
 
   describe("with a custom directory", () => {
