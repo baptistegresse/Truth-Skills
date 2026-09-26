@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app.js";
@@ -39,7 +39,8 @@ const sessionProof = (nonce: string, sessionId: string, extra: object = {}) => (
   ...extra,
 });
 
-const newSessionId = () => `session_${randomToken().length}${createHash("sha256").update(randomToken()).digest("hex")}`;
+// The format World App uses, and IDKit.proveSession requires.
+const newSessionId = () => `session_${randomBytes(64).toString("hex")}`;
 
 const setup = async (overrides: Record<string, string> = {}) => {
   const db = await createTestDb();
@@ -65,7 +66,10 @@ const setup = async (overrides: Record<string, string> = {}) => {
       });
     return new URL(res.headers.location!).searchParams.get("req")!;
   };
-  const rp = (req: string, kind: string) => request(app).post("/login/rp-context").send({ req, kind });
+  const rp = (req: string, kind: string, extra: object = {}, cookie?: string) => {
+    const call = request(app).post("/login/rp-context");
+    return (cookie ? call.set("cookie", cookie) : call).send({ req, kind, ...extra });
+  };
   const verify = (req: string, result: object) => request(app).post("/login/verify").send({ req, result });
 
   // Scan 1 then scan 2, as the page does it. Returns both answers.
@@ -228,7 +232,15 @@ describe("World ID sign-in", () => {
       expect((await t.verify(req, accountProof(retry.body.rp_context.nonce, "0xddd"))).status).toBe(200);
     });
 
-    it("refuses an unknown kind", async () => {
+    it("lets a pasted recovery link interrupt scan 1, and scan 1 follow a failed prove", async () => {
+    const { session: done } = await t.signUp(await t.startLogin(), "0x888");
+    const req = await t.startLogin();
+    await t.rp(req, "account");
+    expect((await t.rp(req, "prove", { recovery: done.body.recovery_url })).status).toBe(200);
+    expect((await t.rp(req, "account")).status).toBe(200);
+  });
+
+  it("refuses an unknown kind", async () => {
       expect((await t.rp(await t.startLogin(), "admin")).status).toBe(400);
     });
   });
@@ -305,6 +317,96 @@ describe("World ID sign-in", () => {
       const res = await request(t.app).post("/login/verify").set("content-type", "application/json").send("{nope");
       expect(res.status).toBe(400);
     });
+  });
+});
+
+describe("returning humans", () => {
+  let t: Awaited<ReturnType<typeof setup>>;
+  let sessionId: string;
+  let recoveryUrl: string;
+  let accountId: string;
+  beforeAll(async () => {
+    t = await setup();
+    const { session, sessionId: id } = await t.signUp(await t.startLogin(), "0xreturning");
+    sessionId = id;
+    recoveryUrl = session.body.recovery_url;
+    accountId = (await t.db.query<{ id: string }>("select id from accounts where world_session_id = $1", [id])).rows[0]!.id;
+  });
+  afterAll(async () => {
+    await t.db.close();
+  });
+
+  const cookie = () => `hr_world_session=${sessionId}`;
+  const accountOfCode = async (redirect: string) => {
+    const code = new URL(redirect).searchParams.get("code")!;
+    const { rows } = await t.db.query<{ account_id: string }>("select account_id from auth_codes where code_hash = $1", [
+      createHash("sha256").update(code).digest("hex"),
+    ]);
+    return rows[0]!.account_id;
+  };
+
+  it("gets a recovery link after sign-up, with the session in the fragment", () => {
+    expect(recoveryUrl).toBe(`http://localhost:3000/login/recover#${sessionId}`);
+  });
+
+  it("signs back in with one scan in the same browser", async () => {
+    const req = await t.startLogin();
+    const rp = await t.rp(req, "prove", {}, cookie());
+    expect(rp.status).toBe(200);
+    expect(rp.body.session_id).toBe(sessionId);
+    expect(rp.body.action).toBeUndefined();
+
+    const res = await t.verify(req, sessionProof(rp.body.rp_context.nonce, sessionId));
+    expect(res.status).toBe(200);
+    expect(await accountOfCode(res.body.redirect)).toBe(accountId);
+    expect(res.headers["set-cookie"]![0]).toContain(`hr_world_session=${sessionId}`);
+  });
+
+  it.each([
+    ["the full link", () => recoveryUrl],
+    ["the bare id, with spaces", () => `  ${sessionId}\n`],
+  ])("signs in on a new machine with %s", async (_label, input) => {
+    const req = await t.startLogin();
+    const rp = await t.rp(req, "prove", { recovery: input() });
+    expect(rp.body.session_id).toBe(sessionId);
+    const res = await t.verify(req, sessionProof(rp.body.rp_context.nonce, sessionId));
+    expect(await accountOfCode(res.body.redirect)).toBe(accountId);
+    const { rows } = await t.db.query<{ n: number }>("select count(*)::int as n from world_nullifiers where nullifier = $1", [
+      "0xreturning",
+    ]);
+    expect(rows[0]!.n).toBe(1); // still one account
+  });
+
+  it("prefers a pasted link over the cookie", async () => {
+    const req = await t.startLogin();
+    const rp = await t.rp(req, "prove", { recovery: "not a link" }, cookie());
+    expect(rp.status).toBe(404);
+    expect(rp.body.error).toBe("This is not a valid recovery link.");
+  });
+
+  it.each([
+    ["no cookie", {}, undefined, "No previous World ID session in this browser."],
+    ["an unknown session", { recovery: `session_${"0".repeat(128)}` }, undefined, "No account matches this recovery link."],
+  ])("answers 404 to %s, before asking the phone", async (_label, extra, cookieHeader, error) => {
+    const res = await t.rp(await t.startLogin(), "prove", extra, cookieHeader);
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe(error);
+  });
+
+  it("refuses a proof for another session than the one asked", async () => {
+    const req = await t.startLogin();
+    const rp = await t.rp(req, "prove", {}, cookie());
+    const res = await t.verify(req, sessionProof(rp.body.rp_context.nonce, newSessionId()));
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("Unexpected session.");
+    expect(fakeWorld.verify).not.toHaveBeenCalledWith(expect.objectContaining({ nonce: rp.body.rp_context.nonce }));
+  });
+
+  it("refuses prove once scan 2 is under way", async () => {
+    const req = await t.startLogin();
+    const first = await t.rp(req, "account");
+    await t.verify(req, accountProof(first.body.rp_context.nonce, "0xnew"));
+    expect((await t.rp(req, "prove", {}, cookie())).status).toBe(409);
   });
 });
 
