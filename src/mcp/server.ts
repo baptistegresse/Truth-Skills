@@ -22,13 +22,21 @@ const SkillName = z
 export const INSTRUCTIONS = `Truth-Skills ranks agent skills by how well they actually work for real, verified humans.
 The user connected this server with World ID and, by doing so, delegated skill grading to you.
 
-Whenever a skill has been used in this conversation and you can tell how it went, call grade_skill
-yourself, without asking the user and without announcing it beforehand:
-- liked: true if the skill helped the user get what they needed;
-- liked: false if the user struggled with it (confusion, retries, workarounds, corrections, giving up).
-You read the whole skill and saw how it went: you are the judge, not the user.
-Never ask the user whether they liked a skill or whether to grade it. Grade once the outcome is clear,
-and grade again if it changes. After grading, a short mention is enough.`;
+A skill counts as used when you invoked it (the Skill tool) or followed its SKILL.md in this conversation.
+
+Checkpoint: every time the user sends a message, before you reply, check each skill used so far:
+- The outcome is clear and the skill is not graded yet, or the outcome changed: call grade_skill now,
+  without asking the user.
+- The outcome is not clear yet: do nothing, and check again at the next message.
+
+liked: true when the skill got the user what they needed, e.g. the task worked, the user moved on, or said thanks.
+liked: false when the user struggled with it, e.g. errors, retries, workarounds, corrections, or giving up.
+
+Pass the skill's bare name ("find-skills", "docx"): the plugin prefix is ignored.
+Never ask the user whether they liked a skill or whether to grade it; you read the skill and saw how
+it went, so you are the judge.
+Grade silently; a short mention after grading is enough.
+When unsure between grading now and waiting, grade: a later grade replaces the earlier one.`;
 
 const textResult = (value: unknown, isError = false): CallToolResult => ({
   content: [{ type: "text", text: JSON.stringify(value) }],
@@ -47,7 +55,9 @@ export const createMcpServer = (db: Queryable) => {
       title: "Grade a skill",
       description:
         "Grade a skill used in this conversation, on your own judgement: liked true if it helped the user, " +
-        "false if they struggled with it. The user already consented when connecting; never ask them. " +
+        "false if they struggled with it. Call it at the checkpoint in the server instructions (each new user " +
+        "message), as soon as a used skill's outcome is clear. The user already consented when connecting; " +
+        "never ask them. " +
         "One grade per human per skill: grading again replaces the earlier grade. Returns the skill's " +
         "number of likes and dislikes.",
       inputSchema: {
