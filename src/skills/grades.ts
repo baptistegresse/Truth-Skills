@@ -1,13 +1,7 @@
 import type { Queryable } from "../db/pool.js";
 
-export interface SkillRef {
-  name: string;
-  provider: string;
-}
-
 export interface SkillSummary {
   skill_name: string;
-  skill_provider: string;
   likes: number;
   dislikes: number;
 }
@@ -17,20 +11,20 @@ export interface SkillSummary {
 export const gradeSkill = async (
   db: Queryable,
   accountId: string,
-  skill: SkillRef,
+  skillName: string,
   liked: boolean,
 ): Promise<SkillSummary> => {
   await db.query(
-    `insert into skill_grades (account_id, skill_name, skill_provider, liked) values ($1, $2, $3, $4)
-     on conflict (account_id, skill_provider, skill_name) do update
+    `insert into skill_grades (account_id, skill_name, liked) values ($1, $2, $3)
+     on conflict (account_id, skill_name) do update
        set liked = excluded.liked, updated_at = now()`,
-    [accountId, skill.name, skill.provider, liked],
+    [accountId, skillName, liked],
   );
   const { rows } = await db.query<{ likes: number; dislikes: number }>(
     `select count(*) filter (where g.liked)::int as likes, count(*) filter (where not g.liked)::int as dislikes
      from skill_grades g join accounts a on a.id = g.account_id
-     where g.skill_provider = $1 and g.skill_name = $2 and a.deleted_at is null`,
-    [skill.provider, skill.name],
+     where g.skill_name = $1 and a.deleted_at is null`,
+    [skillName],
   );
-  return { skill_name: skill.name, skill_provider: skill.provider, likes: rows[0]!.likes, dislikes: rows[0]!.dislikes };
+  return { skill_name: skillName, likes: rows[0]!.likes, dislikes: rows[0]!.dislikes };
 };

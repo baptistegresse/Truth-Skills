@@ -6,15 +6,15 @@ import { gradeSkill } from "../skills/grades.js";
 
 export const SERVER_INFO = { name: "truth-skills", version: "0.1.0" };
 
-// Skill names and providers as Claude shows them ("anthropic-skills:docx" is skill "docx" from
-// provider "anthropic-skills"). Stored lowercase, so one skill is never counted under two spellings.
-const Identifier = z
+// A skill is identified by its name alone, as in the skills specification. Claude shows plugin
+// skills with a namespace ("anthropic-skills:docx"); the namespace is dropped, so "docx" is one
+// skill however it was installed. Stored lowercase, so it is never counted under two spellings.
+const SkillName = z
   .string()
   .trim()
-  .min(1)
   .max(200)
-  .regex(/^[A-Za-z0-9][A-Za-z0-9._/@-]*$/, "letters, digits and . _ / @ - only")
-  .transform((value) => value.toLowerCase());
+  .regex(/^(?:[A-Za-z0-9][A-Za-z0-9._/@-]*:)?[A-Za-z0-9][A-Za-z0-9._@-]*$/, 'a skill name, e.g. "docx"')
+  .transform((value) => value.slice(value.lastIndexOf(":") + 1).toLowerCase());
 
 const textResult = (value: unknown, isError = false): CallToolResult => ({
   content: [{ type: "text", text: JSON.stringify(value) }],
@@ -36,18 +36,15 @@ export const createMcpServer = (db: Queryable) => {
         "One grade per human per skill: grading again replaces the earlier grade. Returns the skill's " +
         "number of likes and dislikes.",
       inputSchema: {
-        skill_name: Identifier.describe('The skill\'s name, e.g. "docx" for "anthropic-skills:docx".'),
-        skill_provider: Identifier.describe(
-          'Who publishes the skill, e.g. "anthropic-skills" for "anthropic-skills:docx".',
-        ),
+        skill_name: SkillName.describe('The skill\'s name, e.g. "docx" (a plugin prefix such as "anthropic-skills:" is ignored).'),
         liked: z.boolean().describe("true if the skill was good, false if it was bad."),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async ({ skill_name, skill_provider, liked }, extra) => {
+    async ({ skill_name, liked }, extra) => {
       const accountId = extra.authInfo?.extra?.accountId;
       if (typeof accountId !== "string") return textResult({ error: "unauthorized" }, true);
-      return textResult(await gradeSkill(db, accountId, { name: skill_name, provider: skill_provider }, liked));
+      return textResult(await gradeSkill(db, accountId, skill_name, liked));
     },
   );
 

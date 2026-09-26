@@ -49,26 +49,21 @@ describe("grade_skill", () => {
     return { isError: result.isError as boolean, value: text.startsWith("{") ? JSON.parse(text) : text };
   };
 
-  const docx = { skill_name: "docx", skill_provider: "anthropic-skills" };
+  const docx = { skill_name: "docx" };
 
   it("is listed with its input schema and no account parameter", async () => {
     const { result } = await rpc(alice, "tools/list", {});
     const tool = result.tools.find((t: { name: string }) => t.name === "grade_skill");
-    expect(Object.keys(tool.inputSchema.properties).sort()).toEqual(["liked", "skill_name", "skill_provider"]);
-    expect(tool.inputSchema.required.sort()).toEqual(["liked", "skill_name", "skill_provider"]);
+    expect(Object.keys(tool.inputSchema.properties).sort()).toEqual(["liked", "skill_name"]);
+    expect(tool.inputSchema.required.sort()).toEqual(["liked", "skill_name"]);
     expect(tool.annotations).toMatchObject({ idempotentHint: true, destructiveHint: false });
   });
 
   it("records the grade for the token's account and returns the skill's totals", async () => {
-    const res = await grade(alice, { skill_name: "pdf", skill_provider: "anthropic-skills", liked: true });
-    expect(res).toEqual({
-      isError: false,
-      value: { skill_name: "pdf", skill_provider: "anthropic-skills", likes: 1, dislikes: 0 },
-    });
-    const { rows } = await db.query(
-      "select account_id, skill_name, skill_provider, liked from skill_grades where skill_name = 'pdf'",
-    );
-    expect(rows).toEqual([{ account_id: alice, skill_name: "pdf", skill_provider: "anthropic-skills", liked: true }]);
+    const res = await grade(alice, { skill_name: "pdf", liked: true });
+    expect(res).toEqual({ isError: false, value: { skill_name: "pdf", likes: 1, dislikes: 0 } });
+    const { rows } = await db.query("select account_id, skill_name, liked from skill_grades where skill_name = 'pdf'");
+    expect(rows).toEqual([{ account_id: alice, skill_name: "pdf", liked: true }]);
   });
 
   it("counts one grade per human: grading again replaces it", async () => {
@@ -85,18 +80,25 @@ describe("grade_skill", () => {
     expect(rows[0]!.updated_at.getTime()).toBeGreaterThanOrEqual(rows[0]!.created_at.getTime());
   });
 
-  it("keeps skills of the same name from different providers apart", async () => {
-    const res = await grade(alice, { skill_name: "docx", skill_provider: "someone-else", liked: true });
-    expect(res.value).toEqual({ skill_name: "docx", skill_provider: "someone-else", likes: 1, dislikes: 0 });
+  it("identifies a skill by its name alone: a plugin prefix is the same skill", async () => {
+    const res = await grade(alice, { skill_name: "anthropic-skills:docx", liked: true });
+    expect(res.value).toEqual({ skill_name: "docx", likes: 2, dislikes: 0 });
+    const { rows } = await db.query("select 1 from skill_grades where account_id = $1 and skill_name = 'docx'", [alice]);
+    expect(rows).toHaveLength(1);
   });
 
-  it("normalises names and providers", async () => {
-    const res = await grade(bob, { skill_name: "  XLSX ", skill_provider: "Anthropic-Skills", liked: false });
-    expect(res.value).toMatchObject({ skill_name: "xlsx", skill_provider: "anthropic-skills" });
+  it("ignores a provider sent by an older client", async () => {
+    const res = await grade(bob, { skill_name: "pdf", skill_provider: "anthropic-skills", liked: true });
+    expect(res).toEqual({ isError: false, value: { skill_name: "pdf", likes: 2, dislikes: 0 } });
+  });
+
+  it("normalises names", async () => {
+    const res = await grade(bob, { skill_name: "  XLSX ", liked: false });
+    expect(res.value).toMatchObject({ skill_name: "xlsx" });
   });
 
   it("stops counting a deleted account", async () => {
-    const pptx = { skill_name: "pptx", skill_provider: "anthropic-skills" };
+    const pptx = { skill_name: "pptx" };
     const carol = (await db.query<{ id: string }>("insert into accounts default values returning id")).rows[0]!.id;
     await grade(carol, { ...pptx, liked: false });
     await db.query("update accounts set deleted_at = now() where id = $1", [carol]);
@@ -104,12 +106,12 @@ describe("grade_skill", () => {
   });
 
   it.each([
-    ["a missing provider", { skill_name: "pdf", liked: true }],
-    ["a missing liked", { skill_name: "pdf", skill_provider: "anthropic-skills" }],
-    ["liked as a string", { skill_name: "pdf", skill_provider: "anthropic-skills", liked: "true" }],
-    ["an empty name", { skill_name: "  ", skill_provider: "anthropic-skills", liked: true }],
-    ["a name with odd characters", { skill_name: "pdf; drop table", skill_provider: "anthropic-skills", liked: true }],
-    ["a provider:name pair in one field", { skill_name: "anthropic-skills:pdf", skill_provider: "x", liked: true }],
+    ["a missing name", { liked: true }],
+    ["a missing liked", { skill_name: "pdf" }],
+    ["liked as a string", { skill_name: "pdf", liked: "true" }],
+    ["an empty name", { skill_name: "  ", liked: true }],
+    ["an empty name after its prefix", { skill_name: "anthropic-skills:", liked: true }],
+    ["a name with odd characters", { skill_name: "pdf; drop table", liked: true }],
   ])("refuses %s", async (_label, args) => {
     const res = await grade(alice, args);
     expect(res.isError).toBe(true);
@@ -117,7 +119,7 @@ describe("grade_skill", () => {
   });
 
   it("refuses to act without an account in the token", async () => {
-    const res = await grade("no-account", { skill_name: "pdf", skill_provider: "anthropic-skills", liked: true });
+    const res = await grade("no-account", { skill_name: "pdf", liked: true });
     expect(res).toEqual({ isError: true, value: { error: "unauthorized" } });
   });
 });
