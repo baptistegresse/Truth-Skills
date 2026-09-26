@@ -8,7 +8,9 @@
     "dev": "tsx watch --env-file=.env src/index.ts",
     "typecheck": "tsc",
     "test:watch": "vitest",
-    "migrate": "tsx --env-file=.env src/scripts/migrate.ts"
+    "migrate": "tsx --env-file=.env src/scripts/migrate.ts",
+    "staging:open": "tsx --env-file=.env src/scripts/stagingWindow.ts open",
+    "staging:close": "tsx --env-file=.env src/scripts/stagingWindow.ts close"
   },
   "repository": {
     "type": "git",
