@@ -41,9 +41,12 @@ const postJson = async (url, body) => {
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status}).`);
+  if (!res.ok) throw Object.assign(new Error(data.error || `Request failed (${res.status}).`), { status: res.status });
   return data;
 };
+
+// The server answers 404 to a "prove" request when this browser's session matches no account.
+const NO_SESSION = 404;
 
 const showQr = (uri) => {
   const qr = window.qrcode(0, "M");
@@ -177,18 +180,21 @@ const showRecoveryLink = (outcome) => {
   });
 };
 
+// A returning human proves the session remembered by this browser. Only when the server knows no
+// such session does the page fall back to sign-up: for an existing human, World App would refuse
+// scan 1, so any other failure is shown, with "Try again" and the recovery link.
 const start = async () => {
-  if (ctx.returning) {
-    try {
-      setStatus("Welcome back — scan once with World App.");
-      await proveFlow(undefined);
-      return;
-    } catch (error) {
-      if (isAbort(error)) return;
-      // The session in this browser did not work: fall back to the first sign-in.
+  if (!ctx.returning) return accountFlow();
+  setStatus("Welcome back — scan once with World App.");
+  try {
+    await proveFlow(undefined);
+  } catch (error) {
+    if (error.status !== NO_SESSION) {
+      if (!isAbort(error)) show("recovery-form", true);
+      throw error;
     }
+    await accountFlow();
   }
-  await accountFlow();
 };
 
 $("recovery-form").addEventListener("submit", (event) => {

@@ -43,20 +43,31 @@ const fakeElement = (): FakeElement => {
   return el;
 };
 
-// Runs the real sign-in page script against a fake DOM, a fake server and a fake World App whose
-// scan ends with `worldError`.
-const runSignInPage = async (worldError: string) => {
+interface Scenario {
+  worldError: string; // how every World App scan ends
+  returning?: boolean; // this browser has the World ID session cookie
+  proveStatus?: number; // the server's answer to a "prove" rp-context request
+}
+
+// Runs the real sign-in page script against a fake DOM, a fake server and a fake World App.
+const runSignInPage = async ({ worldError, returning = false, proveStatus = 200 }: Scenario) => {
+  const kinds: string[] = []; // the rp-context requests the page made, in order
   const elements = new Map<string, FakeElement>();
   const element = (id: string) => {
     if (!elements.has(id)) elements.set(id, fakeElement());
     return elements.get(id)!;
   };
-  const json = (body: unknown) => ({ ok: true, json: async () => body });
-  const fetch = vi.fn(async (url: string) => {
+  const json = (body: unknown, status = 200) => ({ ok: status < 400, status, json: async () => body });
+  const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
     if (url.startsWith("/login/context")) {
-      return json({ client_name: "Claude Code", redirect_host: "localhost:1", app_id: "app_x", environment: "sandbox", credentials: ["selfie"], invite_code: false, returning: false });
+      return json({ client_name: "Claude Code", redirect_host: "localhost:1", app_id: "app_x", environment: "sandbox", credentials: ["selfie"], invite_code: false, returning });
     }
-    if (url === "/login/rp-context") return json({ rp_context: {}, action: "truth-skills-account-v1" });
+    if (url === "/login/rp-context") {
+      const { kind } = JSON.parse(init?.body ?? "{}");
+      kinds.push(kind);
+      if (kind === "prove" && proveStatus !== 200) return json({ error: "No previous World ID session in this browser." }, proveStatus);
+      return json({ rp_context: {}, action: kind === "account" ? "truth-skills-account-v1" : undefined, session_id: "session_ab" });
+    }
     throw new Error(`unexpected fetch ${url}`);
   });
   const request = {
@@ -65,6 +76,7 @@ const runSignInPage = async (worldError: string) => {
   };
   const IDKit = {
     request: () => ({ constraints: async () => request }),
+    proveSession: () => ({ constraints: async () => request }),
     any: () => ({}),
     CredentialRequest: () => ({}),
   };
@@ -83,12 +95,12 @@ const runSignInPage = async (worldError: string) => {
   });
   runInContext(await readFile(LOGIN_JS, "utf8"), context);
   await vi.waitFor(() => expect(element("status").isError).toBe(true)); // the scan has failed and the page has reacted
-  return element;
+  return { element, kinds };
 };
 
 describe("sign-in page", () => {
   it("sends a human who already has an account to the recovery link", async () => {
-    const element = await runSignInPage("nullifier_replayed");
+    const { element } = await runSignInPage({ worldError: "nullifier_replayed" });
 
     expect(element("status").textContent).toMatch(/already have a Truth-Skills account/);
     expect(element("recovery-form").hidden).toBe(false);
@@ -97,9 +109,25 @@ describe("sign-in page", () => {
   });
 
   it("offers to try again after any other World App error", async () => {
-    const element = await runSignInPage("user_rejected");
+    const { element } = await runSignInPage({ worldError: "user_rejected" });
 
     expect(element("status").textContent).toBe("World App did not complete the request (user_rejected).");
     expect(element("retry").hidden).toBe(false);
+  });
+
+  it("shows why a returning human's session scan failed instead of falling back to sign-up", async () => {
+    const { element, kinds } = await runSignInPage({ worldError: "connection_failed", returning: true });
+
+    expect(kinds).toEqual(["prove"]); // no scan 1: World App would refuse it for an existing human
+    expect(element("status").textContent).toBe("World App did not complete the request (connection_failed).");
+    expect(element("retry").hidden).toBe(false);
+    expect(element("recovery-form").hidden).toBe(false);
+  });
+
+  it("falls back to sign-up when the server knows no session for this browser", async () => {
+    const { element, kinds } = await runSignInPage({ worldError: "user_rejected", returning: true, proveStatus: 404 });
+
+    expect(kinds).toEqual(["prove", "account"]);
+    expect(element("status").textContent).toBe("World App did not complete the request (user_rejected).");
   });
 });
