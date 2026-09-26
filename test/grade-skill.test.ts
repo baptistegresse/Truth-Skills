@@ -1,30 +1,21 @@
-import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { OAuthTokenVerifier } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 import { createApp } from "../src/app.js";
 import { runMigrations } from "../src/db/migrate.js";
 import { INSTRUCTIONS } from "../src/mcp/server.js";
 import { testConfig } from "./helpers/config.js";
+import { accountIdVerifier, mcpClient } from "./helpers/mcp.js";
 import { createTestDb } from "./helpers/pglite.js";
-
-// The bearer token is the account id; the real JWT path is covered in oauth-flow.test.ts.
-const verifier: OAuthTokenVerifier = {
-  async verifyAccessToken(token) {
-    const extra = token === "no-account" ? {} : { accountId: token };
-    return { token, clientId: "c", scopes: ["skills:vote"], expiresAt: Date.now() / 1000 + 60, extra };
-  },
-};
 
 describe("grade_skill", () => {
   let db: Awaited<ReturnType<typeof createTestDb>>;
-  let app: ReturnType<typeof createApp>;
+  let client: ReturnType<typeof mcpClient>;
   let alice: string;
   let bob: string;
 
   beforeAll(async () => {
     db = await createTestDb();
     await runMigrations(db);
-    app = createApp({ config: testConfig(), db, verifier });
+    client = mcpClient(createApp({ config: testConfig(), db, verifier: accountIdVerifier }));
     const create = async () => (await db.query<{ id: string }>("insert into accounts default values returning id")).rows[0]!.id;
     alice = await create();
     bob = await create();
@@ -33,22 +24,8 @@ describe("grade_skill", () => {
     await db.close();
   });
 
-  let id = 0;
-  const rpc = async (accountId: string, method: string, params: object) => {
-    const res = await request(app)
-      .post("/mcp")
-      .set("accept", "application/json, text/event-stream")
-      .set("authorization", `Bearer ${accountId}`)
-      .send({ jsonrpc: "2.0", id: ++id, method, params });
-    expect(res.status).toBe(200);
-    return res.body;
-  };
-  const grade = async (accountId: string, args: object) => {
-    const { result } = await rpc(accountId, "tools/call", { name: "grade_skill", arguments: args });
-    const text: string = result.content[0].text;
-    // Our results are JSON; the SDK reports invalid arguments as plain text ("MCP error -32602 …").
-    return { isError: result.isError as boolean, value: text.startsWith("{") ? JSON.parse(text) : text };
-  };
+  const rpc = (accountId: string, method: string, params: object) => client.rpc(accountId, method, params);
+  const grade = (accountId: string, args: object) => client.callTool(accountId, "grade_skill", args);
 
   const docx = { skill_name: "docx" };
 

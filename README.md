@@ -8,7 +8,9 @@ Claude Code ──OAuth 2.1 + PKCE──▶ Truth-Skills ──verify proof─�
      └── Bearer token on POST /mcp ──┘    └── sign-in page ◀── World App (phone)
 ```
 
-- **MCP endpoint**: `POST /mcp`, stateless Streamable HTTP. One tool, `grade_skill`, acting for the account in the access token. The agent grades on its own: the server's instructions tell it to grade every skill used in the conversation (liked when it helped, disliked when the user struggled) without ever asking the user.
+- **MCP endpoint**: `POST /mcp`, stateless Streamable HTTP. Two tools, acting for the account in the access token:
+  - `grade_skill`: the agent grades on its own. The server's instructions tell it to grade every skill used in the conversation (liked when it helped, disliked when the user struggled) without ever asking the user.
+  - `check_skill` (read-only): when the agent recommends a skill or the user installs one, it shows how many verified humans liked it and how many did not, as raw counts. A skill no one has graded yet is reported as probably new.
 - **Authorization server**: our own, in the same process (`/authorize`, `/token`, `/register`, `/revoke`, RFC 8414 / 9728 metadata).
 - **Sign-in**: the first time, two scans with World App: a uniqueness proof creates the account, then a World ID session lets us recognise the same human later. Returning humans scan once.
 
@@ -55,12 +57,12 @@ claude                       # from the same folder the MCP was added in
 /mcp  →  truth-skills  →  Authenticate
 ```
 
-The browser opens the sign-in page. It shows which application is asking and which local address it will return to; continue only if you started it from Claude Code. Scan QR 1, scan QR 2, save the recovery link, then click **I saved it, continue**. Back in Claude Code, `/mcp` shows truth-skills connected with `grade_skill`.
+The browser opens the sign-in page. It shows which application is asking and which local address it will return to; continue only if you started it from Claude Code. Scan QR 1, scan QR 2, save the recovery link, then click **I saved it, continue**. Back in Claude Code, `/mcp` shows truth-skills connected with `grade_skill` and `check_skill`.
 
-Let the agent grade without a permission prompt, since grading is exactly what the user agreed to when connecting. In the project's `.claude/settings.json` (or `~/.claude/settings.json` for every project):
+Let the agent grade and check skills without a permission prompt, since that is exactly what the user agreed to when connecting. In the project's `.claude/settings.json` (or `~/.claude/settings.json` for every project):
 
 ```json
-{ "permissions": { "allow": ["mcp__truth-skills__grade_skill"] } }
+{ "permissions": { "allow": ["mcp__truth-skills__grade_skill", "mcp__truth-skills__check_skill"] } }
 ```
 
 Afterwards Claude Code refreshes its token silently every hour. After 90 days, or on a new machine, it signs in again:
@@ -83,27 +85,27 @@ The server runs at `https://truth-skills.vercel.app/mcp`. You don't need a local
 claude mcp add --scope user --transport http truth-skills-prod https://truth-skills.vercel.app/mcp
 ```
 
-`--scope user` makes it available in every folder you start `claude` in. The name `truth-skills-prod` becomes part of the tool's name: `mcp__truth-skills-prod__grade_skill`.
+`--scope user` makes it available in every folder you start `claude` in. The name `truth-skills-prod` becomes part of the tool's name: `mcp__truth-skills-prod__grade_skill` and `mcp__truth-skills-prod__check_skill`.
 
-**2. Recommended: load the tool up front.** Claude Code defers MCP tools by default, so Claude only sees `grade_skill` after searching for it, and the server's "grade on your own" instructions can't take effect. To add the server with `alwaysLoad` instead of the command in step 1:
+**2. Recommended: load the tool up front.** Claude Code defers MCP tools by default, so Claude only sees `grade_skill` and `check_skill` after searching for them, and the server's instructions (grade on your own, check a skill before it is installed) can't take effect. To add the server with `alwaysLoad` instead of the command in step 1:
 
 ```bash
 claude mcp add-json --scope user truth-skills-prod '{"type":"http","url":"https://truth-skills.vercel.app/mcp","alwaysLoad":true}'
 ```
 
-**3. Let the agent grade without a permission prompt.** Add the rule to `.claude/settings.local.json` in your project. This file is personal and git-ignored; merge the rule into any existing `allow` list:
+**3. Let the agent grade and check without a permission prompt.** Add the rule to `.claude/settings.local.json` in your project. This file is personal and git-ignored; merge the rule into any existing `allow` list:
 
 ```json
 {
   "permissions": {
-    "allow": ["mcp__truth-skills-prod__grade_skill"]
+    "allow": ["mcp__truth-skills-prod__grade_skill", "mcp__truth-skills-prod__check_skill"]
   }
 }
 ```
 
 A rule in `.claude/settings.local.json` applies to that project only. To grade without prompts everywhere, put the same rule in `~/.claude/settings.json`.
 
-**4. Sign in.** Start a new `claude` session, then go to `/mcp` → **truth-skills-prod** → **Authenticate**. The browser opens `https://truth-skills.vercel.app/login`; sign in with World ID as described above. `/mcp` should then show truth-skills-prod as connected, with `grade_skill`.
+**4. Sign in.** Start a new `claude` session, then go to `/mcp` → **truth-skills-prod** → **Authenticate**. The browser opens `https://truth-skills.vercel.app/login`; sign in with World ID as described above. `/mcp` should then show truth-skills-prod as connected, with `grade_skill` and `check_skill`.
 
 To check:
 
@@ -111,9 +113,9 @@ To check:
 claude mcp list          # truth-skills-prod: https://truth-skills.vercel.app/mcp (HTTP) - ✓ Connected
 ```
 
-In Claude Code, `/permissions` should list `mcp__truth-skills-prod__grade_skill` under Allow.
+In Claude Code, `/permissions` should list both tools under Allow.
 
-**Keep one entry per deployment.** If you also have a local development entry (`truth-skills` → `http://localhost:3000/mcp`), Claude sees two `grade_skill` tools. Remove the one you don't use (`claude mcp remove truth-skills -s local`), or leave the development entry without `alwaysLoad`.
+**Keep one entry per deployment.** If you also have a local development entry (`truth-skills` → `http://localhost:3000/mcp`), Claude sees each tool twice. Remove the one you don't use (`claude mcp remove truth-skills -s local`), or leave the development entry without `alwaysLoad`.
 
 To remove the production server: `claude mcp remove truth-skills-prod -s user`.
 
@@ -123,8 +125,9 @@ Run this against the sandbox before a demo.
 
 - [ ] `curl -si -X POST localhost:3000/mcp -H 'content-type: application/json' -d '{}'` → `401` with `WWW-Authenticate: Bearer error="invalid_token", … resource_metadata="…/.well-known/oauth-protected-resource/mcp"`
 - [ ] `curl -s localhost:3000/.well-known/oauth-authorization-server` lists `/authorize`, `/token`, `/register`, `/revoke` and `S256`
-- [ ] First sign-in from Claude Code: two scans, recovery link shown, back in Claude Code with `grade_skill` listed
+- [ ] First sign-in from Claude Code: two scans, recovery link shown, back in Claude Code with `grade_skill` and `check_skill` listed
 - [ ] Use a skill in a conversation (e.g. ask for a .docx); once it is done, Claude grades it on its own, without asking, and mentions it briefly
+- [ ] Ask for a skill recommendation (e.g. "find a skill for PDFs"): Claude calls `check_skill` and shows the raw like/dislike counts, or says the skill is probably new
 - [ ] Same browser: `/mcp` → truth-skills → clear authentication → Authenticate → "Welcome back", one scan, same account
 - [ ] New machine: open the sign-in URL in a fresh private window (it must say "Step 1 of 2", not "Welcome back"), use the recovery link, one scan, same account
 - [ ] Database afterwards:
@@ -203,5 +206,5 @@ Implemented, and covered by tests where noted:
 | `src/auth/stagingWindow.ts` | Sandbox verification window (Developer Portal) |
 | `src/http/login.ts`, `src/http/pages.ts` | Sign-in API, pages and assets |
 | `public/` | Sign-in page, recovery page |
-| `src/mcp/server.ts`, `src/skills/grades.ts` | The MCP server and `grade_skill` |
+| `src/mcp/server.ts`, `src/skills/grades.ts` | The MCP server, `grade_skill` and `check_skill` |
 | `src/db/`, `migrations/` | Connection pool, migration runner, schema |

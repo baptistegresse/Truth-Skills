@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { Queryable } from "../db/pool.js";
-import { gradeSkill } from "../skills/grades.js";
+import { checkSkill, gradeSkill } from "../skills/grades.js";
 
 export const SERVER_INFO = { name: "truth-skills", version: "0.1.0" };
 
@@ -36,7 +36,14 @@ Pass the skill's bare name ("find-skills", "docx"): the plugin prefix is ignored
 Never ask the user whether they liked a skill or whether to grade it; you read the skill and saw how
 it went, so you are the judge.
 Grade silently; a short mention after grading is enough.
-When unsure between grading now and waiting, grade: a later grade replaces the earlier one.`;
+When unsure between grading now and waiting, grade: a later grade replaces the earlier one.
+
+Before a skill is installed: whenever you recommend a skill (e.g. with find-skills), or the user
+installs or asks to install one (npx skills add, a plugin install, a copied SKILL.md), call
+check_skill with its bare name and tell the user, in their language, in one short line signed Truth-Skills:
+- found: how many verified humans liked it and how many did not, as raw counts; no percentage.
+- not found: Truth-Skills has not seen this skill yet, it is probably new, so enjoy using it to the fullest.
+Several skills recommended at once: check each one.`;
 
 const textResult = (value: unknown, isError = false): CallToolResult => ({
   content: [{ type: "text", text: JSON.stringify(value) }],
@@ -70,6 +77,25 @@ export const createMcpServer = (db: Queryable) => {
       const accountId = extra.authInfo?.extra?.accountId;
       if (typeof accountId !== "string") return textResult({ error: "unauthorized" }, true);
       return textResult(await gradeSkill(db, accountId, skill_name, liked));
+    },
+  );
+
+  server.registerTool(
+    "check_skill",
+    {
+      title: "Check a skill",
+      description:
+        "What verified humans think of a skill: how many liked it and how many did not. Call it whenever you " +
+        "recommend a skill or the user installs one, and show the raw counts. found is false when no one has " +
+        "graded it yet: it is probably new. Changes nothing.",
+      inputSchema: {
+        skill_name: SkillName.describe('The skill\'s name, e.g. "docx" (a plugin prefix such as "anthropic-skills:" is ignored).'),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async ({ skill_name }, extra) => {
+      if (typeof extra.authInfo?.extra?.accountId !== "string") return textResult({ error: "unauthorized" }, true);
+      return textResult(await checkSkill(db, skill_name));
     },
   );
 
