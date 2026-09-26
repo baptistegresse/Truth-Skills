@@ -5,6 +5,8 @@ import type { OAuthTokenVerifier } from "@modelcontextprotocol/sdk/server/auth/p
 import { createApp } from "../src/app.js";
 
 const config = { PUBLIC_URL: "http://localhost:3000" };
+// None of these requests reach the database.
+const db = { query: async () => { throw new Error("unexpected query"); } };
 const RESOURCE_METADATA = "http://localhost:3000/.well-known/oauth-protected-resource/mcp";
 
 const initialize = {
@@ -28,7 +30,7 @@ const postMcp = (app: ReturnType<typeof createApp>, token?: string) => {
 };
 
 describe("POST /mcp without a valid token", () => {
-  const app = createApp({ config });
+  const app = createApp({ config, db });
 
   it("answers 401 and points to the protected resource metadata", async () => {
     const res = await postMcp(app).send(initialize);
@@ -58,14 +60,14 @@ describe("POST /mcp without a valid token", () => {
 
 describe("POST /mcp with a token", () => {
   it("answers 403 insufficient_scope without skills:vote", async () => {
-    const app = createApp({ config, verifier: verifierFor([]) });
+    const app = createApp({ config, db, verifier: verifierFor([]) });
     const res = await postMcp(app, "good").send(initialize);
     expect(res.status).toBe(403);
     expect(res.headers["www-authenticate"]).toContain('error="insufficient_scope"');
   });
 
   it("reaches the MCP server statelessly with skills:vote", async () => {
-    const app = createApp({ config, verifier: verifierFor(["skills:vote"]) });
+    const app = createApp({ config, db, verifier: verifierFor(["skills:vote"]) });
     const res = await postMcp(app, "good").send(initialize);
     expect(res.status).toBe(200);
     expect(res.body.result.serverInfo.name).toBe("truth-skills");
@@ -75,7 +77,7 @@ describe("POST /mcp with a token", () => {
 
 describe("other methods on /mcp", () => {
   it.each(["get", "delete"] as const)("%s answers 405 with Allow: POST", async (method) => {
-    const res = await request(createApp({ config }))[method]("/mcp");
+    const res = await request(createApp({ config, db }))[method]("/mcp");
     expect(res.status).toBe(405);
     expect(res.headers.allow).toBe("POST");
   });
@@ -83,7 +85,7 @@ describe("other methods on /mcp", () => {
 
 describe("GET /.well-known/oauth-protected-resource/mcp", () => {
   it("serves the RFC 9728 metadata", async () => {
-    const res = await request(createApp({ config })).get("/.well-known/oauth-protected-resource/mcp");
+    const res = await request(createApp({ config, db })).get("/.well-known/oauth-protected-resource/mcp");
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
       resource: "http://localhost:3000/mcp",
@@ -94,7 +96,7 @@ describe("GET /.well-known/oauth-protected-resource/mcp", () => {
   });
 
   it("follows PUBLIC_URL", async () => {
-    const app = createApp({ config: { PUBLIC_URL: "https://truth-skills.example" } });
+    const app = createApp({ config: { PUBLIC_URL: "https://truth-skills.example" }, db });
     const res = await request(app).get("/.well-known/oauth-protected-resource/mcp");
     expect(res.body.resource).toBe("https://truth-skills.example/mcp");
     const unauthorized = await postMcp(app).send(initialize);

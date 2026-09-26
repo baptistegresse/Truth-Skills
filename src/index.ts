@@ -1,10 +1,11 @@
 import { createApp } from "./app.js";
 import { loadConfig } from "./config.js";
+import { createPool } from "./db/pool.js";
 
 const main = () => {
   const config = loadConfig();
-  // The OAuth router and sign-in routes are wired in later branches.
-  const app = createApp({ config });
+  // The sign-in routes are wired in a later branch.
+  const app = createApp({ config, db: createPool(config.DATABASE_URL) });
   app.listen(config.PORT, () => {
     console.log(`Truth-Skills listening on ${config.PUBLIC_URL} (${config.WORLD_ENVIRONMENT})`);
   });

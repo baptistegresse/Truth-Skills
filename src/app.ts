@@ -1,19 +1,21 @@
 import express from "express";
-import { metadataHandler } from "@modelcontextprotocol/sdk/server/auth/handlers/metadata.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import type { OAuthTokenVerifier } from "@modelcontextprotocol/sdk/server/auth/provider.js";
-import { getOAuthProtectedResourceMetadataUrl } from "@modelcontextprotocol/sdk/server/auth/router.js";
+import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { VOTE_SCOPE, type Config } from "./config.js";
-import { rejectAllTokens } from "./auth/verifier.js";
+import { TruthSkillsAuthProvider } from "./auth/provider.js";
+import type { Queryable } from "./db/pool.js";
 import { createMcpServer } from "./mcp/server.js";
 
 export interface AppOptions {
   config: Pick<Config, "PUBLIC_URL">;
+  db: Queryable;
+  // Overrides the provider's token check; lets tests reach /mcp before tokens can be issued.
   verifier?: OAuthTokenVerifier;
 }
 
-export const createApp = ({ config, verifier = rejectAllTokens }: AppOptions) => {
+export const createApp = ({ config, db, verifier }: AppOptions) => {
   const app = express();
   app.disable("x-powered-by");
 
@@ -21,18 +23,25 @@ export const createApp = ({ config, verifier = rejectAllTokens }: AppOptions) =>
   const resourceUrl = new URL("/mcp", config.PUBLIC_URL);
   const resourceMetadataUrl = getOAuthProtectedResourceMetadataUrl(resourceUrl);
 
-  // Protected Resource Metadata (RFC 9728): tells the client which authorization server to use.
+  const provider = new TruthSkillsAuthProvider(db);
+
+  // The authorization server: /authorize, /token, /register, the RFC 8414 metadata, and the
+  // RFC 9728 protected resource metadata that tells the client which authorization server to use.
   app.use(
-    new URL(resourceMetadataUrl).pathname,
-    metadataHandler({
-      resource: resourceUrl.href,
-      authorization_servers: [new URL(config.PUBLIC_URL).href],
-      scopes_supported: [VOTE_SCOPE],
-      resource_name: "Truth-Skills",
+    mcpAuthRouter({
+      provider,
+      issuerUrl: new URL(config.PUBLIC_URL),
+      scopesSupported: [VOTE_SCOPE],
+      resourceServerUrl: resourceUrl,
+      resourceName: "Truth-Skills",
     }),
   );
 
-  const bearer = requireBearerAuth({ verifier, requiredScopes: [VOTE_SCOPE], resourceMetadataUrl });
+  const bearer = requireBearerAuth({
+    verifier: verifier ?? provider,
+    requiredScopes: [VOTE_SCOPE],
+    resourceMetadataUrl,
+  });
 
   // Stateless Streamable HTTP: one McpServer + transport per request, no Mcp-Session-Id.
   // bearer runs before express.json, so an unauthenticated body is never parsed.
