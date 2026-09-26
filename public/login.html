@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sign in to Truth-Skills</title>
+    <link rel="stylesheet" href="/login/assets/login.css" />
+    <script src="/login/assets/qrcode.js" defer></script>
+    <script src="/login/assets/idkit.global.js" defer></script>
+    <script src="/login/assets/login.js" defer></script>
+  </head>
+  <body>
+    <main class="card">
+      <h1>Sign in to Truth-Skills</h1>
+
+      <section id="client" class="client" hidden>
+        <p><strong id="client-name"></strong> wants to act on your behalf.</p>
+        <p class="muted">After sign-in you will be sent back to <code id="redirect-host"></code>. Continue only if you started this from Claude Code on this computer.</p>
+      </section>
+
+      <p id="status" class="status" role="status" aria-live="polite">Loading…</p>
+
+      <section id="scan" class="scan" hidden>
+        <img id="qr-img" alt="QR code to scan with World App" width="260" height="260" />
+        <p><a id="qr-link" rel="noopener">Open in World App</a> if you are on your phone.</p>
+      </section>
+
+      <form id="recovery-form" class="recovery-form" hidden>
+        <details>
+          <summary>Already have an account? Use my recovery link</summary>
+          <label for="recovery-input">Recovery link</label>
+          <input id="recovery-input" type="text" autocomplete="off" spellcheck="false" placeholder="…/login/recover#session_…" required />
+          <button type="submit">Sign in with this link</button>
+        </details>
+      </form>
+
+      <section id="recovery" class="recovery" hidden>
+        <h2>Save your recovery link</h2>
+        <p>This browser will remember you. On another computer, or after clearing cookies, you will need this link — and your phone — to sign in again. Without it you cannot get back into this account.</p>
+        <div class="copy-row">
+          <input id="recovery-url" type="text" readonly aria-label="Recovery link" />
+          <button id="copy" type="button">Copy link</button>
+        </div>
+        <button id="continue" type="button" class="primary">I saved it, continue</button>
+      </section>
+
+      <button id="retry" type="button" hidden>Try again</button>
+    </main>
+  </body>
+</html>
