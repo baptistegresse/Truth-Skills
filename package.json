@@ -1,0 +1,22 @@
+{
+  "name": "humanrank",
+  "version": "0.1.0",
+  "description": "HumanRank MCP server: OAuth 2.1 + World ID sign-in for Claude Code",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/baptistegresse/Truth-Skills.git"
+  },
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/baptistegresse/Truth-Skills/issues"
+  },
+  "homepage": "https://github.com/baptistegresse/Truth-Skills#readme",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  }
+}
